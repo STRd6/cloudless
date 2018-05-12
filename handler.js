@@ -3,6 +3,8 @@
 const AWS = require('aws-sdk')
 const request = require('request')
 
+const BUCKET = "cron-dev-s3bucketdata" // Hardcoded bucket because lambda@edge doesn't support environment variables!!@!
+
 module.exports = {
   bucketEvent: (event, context, callback) => {
     console.log(JSON.stringify(event, null, 2))
@@ -21,6 +23,41 @@ module.exports = {
       }
 
       callback(err, true)
+    });
+  },
+  edge: (event, context, callback) => {
+    // This routes every http request!
+
+    // TODO:
+    // Handle user auth,
+    // invoke correct sub-lambda
+    console.log(JSON.stringify(event, null, 2))
+    console.log(JSON.stringify(context, null, 2))
+
+    const errorResponse = (err) => {
+      return {
+        status: 500,
+        statusDescription: "Internal Server Error",
+        body: JSON.stringify(err)
+      };
+    }
+
+    new AWS.S3().getObject({
+      Bucket: BUCKET,
+      Key: "system/edge.js"
+    }, function(err, data) {
+      if (err) {
+        return callback(null, errorResponse(err))
+      }
+
+      // Load and execute dynamic handlers from S3, woo!
+      const program = data.Body.toString()
+      // TODO: Security :P
+      try {
+        Function('event', 'context', 'callback', program)(event, context, callback);
+      } catch (e) {
+        callback(null, errorResponse(e))
+      }
     });
   },
   http: (event, context, callback) => {

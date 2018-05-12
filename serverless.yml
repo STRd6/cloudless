@@ -15,6 +15,7 @@ service: cron
 
 plugins:
   - serverless-domain-manager
+  - serverless-plugin-cloudfront-lambda-edge
 
 # You can pin your service to only deploy with a specific Serverless version
 # Check out our docs for more details
@@ -43,7 +44,7 @@ custom:
   bucketName: '${self:service}-${self:provider.stage}-s3bucketdata'
 
   customDomain:
-    domainName: "*.serverless.whimsy.space"
+    domainName: serverless.whimsy.space
     basePath: ""
     certificateName: "*.serverless.whimsy.space"
     createRoute53Record: true
@@ -72,6 +73,11 @@ functions:
       - http:
           path: /{any+} # this matches any path, the token 'any' doesn't mean anything special
           method: ANY
+  edge:
+    handler: handler.edge
+    lambdaAtEdge:
+       distribution: SiteDistribution
+       eventType: 'origin-request'
   cron:
     handler: handler.run  # This will require the handler.js file,
                           # and execute the exported run function
@@ -146,6 +152,50 @@ resources:
         SourceAccount:
           Ref: AWS::AccountId
         SourceArn: "arn:aws:s3:::${self:custom.bucketName}"
+
+    SiteDistribution:
+      Type: 'AWS::CloudFront::Distribution'
+      Properties:
+        DistributionConfig:
+          Aliases:
+            - "*.serverless.whimsy.space"
+            - serverless.whimsy.space
+          Comment: "*.serverless.whimsy.space"
+          DefaultCacheBehavior:
+            AllowedMethods:
+              - DELETE
+              - GET
+              - HEAD
+              - OPTIONS
+              - PATCH
+              - POST
+              - PUT
+            DefaultTTL: '10'
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            ForwardedValues:
+              QueryString: false
+              Headers:
+                - Access-Control-Request-Headers
+                - Access-Control-Request-Method
+                - Origin
+                - Host
+              Cookies:
+                Forward: none
+          DefaultRootObject: 'index.html'
+          Enabled: true
+          HttpVersion: 'http2'
+          PriceClass: PriceClass_200
+          ViewerCertificate:
+            SslSupportMethod: sni-only
+            AcmCertificateArn: >-
+              arn:aws:acm:us-east-1:186123361267:certificate/3c823396-913b-442a-bb97-3a3127fdf285
+          Origins:
+            -
+              Id: S3Origin
+              CustomOriginConfig:
+                OriginProtocolPolicy: http-only
+              DomainName: { 'Fn::Join': [ '.', [ { 'Ref': 'S3BucketData' }, 's3-website-us-east-1.amazonaws.com' ] ] }
 
 #  Outputs:
 #     NewOutput:

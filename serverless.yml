@@ -181,7 +181,9 @@ resources:
                 - Origin
                 - Host
               Cookies:
-                Forward: none
+                Forward: whitelist
+                WhitelistedNames:
+                  - _sesh
           DefaultRootObject: 'index.html'
           Enabled: true
           HttpVersion: 'http2'

@@ -18,8 +18,10 @@ const response = {
   status: 200,
   statusDescription: "OK",
   headers: headers({
-    "Content-Type": "application/json",
-    "Cache-Control": "max-age=0"
+    "Content-Type": "text/html",
+    "Cache-Control": "max-age=0",
+    "Heyy": "yo",
+    "Set-Cookie": "_sesh=rad; Domain=serverless.whimsy.space; HttpOnly"
   }),
   body: JSON.stringify(request)
 };

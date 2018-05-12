@@ -42,20 +42,23 @@ module.exports = {
       };
     }
 
+    // Note: if anyone gets write access to system/edge.js then...
     new AWS.S3().getObject({
       Bucket: BUCKET,
       Key: "system/edge.js"
     }, function(err, data) {
       if (err) {
+        console.error(err)
         return callback(null, errorResponse(err))
       }
 
       // Load and execute dynamic handlers from S3, woo!
       const program = data.Body.toString()
-      // TODO: Security :P
       try {
-        Function('event', 'context', 'callback', program)(event, context, callback);
+        const {request, config} = event.Records[0].cf
+        Function('event', 'request', 'config', 'context', 'callback', program)(event, request, config, context, callback);
       } catch (e) {
+        console.error(e)
         callback(null, errorResponse(e))
       }
     });

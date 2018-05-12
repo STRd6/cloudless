@@ -40,3 +40,4 @@ Debugging Lambda@Edge is wild too! https://docs.aws.amazon.com/AmazonCloudFront/
 
     When you check for the log files, be aware that log files are stored in the Region closest to the location where the function is executed. So if you visit a website from, for example, London, you must change the Region to view the CloudWatch Logs for the London Region.
 
+CloudFront can't cache based on `Host` with an S3 Origin, so be sure to use the S3 website origin.

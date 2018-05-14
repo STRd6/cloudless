@@ -28,6 +28,8 @@ provider:
   environment:
     RAD: cool
     BUCKET: '${self:custom.bucketName}'
+    DYNAMODB_USERDATA_TABLE: '${self:service}-userdata'
+    USER_POOL_NAME: '${self:service}'
   region: us-east-1
 
   iamRoleStatements:
@@ -153,6 +155,49 @@ resources:
           Ref: AWS::AccountId
         SourceArn: "arn:aws:s3:::${self:custom.bucketName}"
 
+    # CloudFront Distribution
+    # =======================
+    # Using Lambda@Edge with CloudFront you can set up a function to run
+    # upon every request to any path on any subdomain.
+    #
+    # Allowed Methods
+    # ---------------
+    # We want to be able to respond to all methods in our lambda so we list them
+    # all here.
+    #
+    # Cookies
+    # -------
+    # I'm currently whitelisting one cookie for experimental session tracking
+    # across all subdomains, the goal being to know who is logged in and to
+    # provide some kind of basic groups/permissions for users as the interact
+    # with apps and data.
+    #
+    # Ex. Person A builds a game, Person B visits Person A's game, since the
+    # subdomain shares a cookie domain, and that cookie is HttpOnly, then our
+    # system can know who is logged in and who's app they are interacting with.
+    # We can then allow that user to interact with that app at the appropriate
+    # level of permissions.
+    #
+    # We can set up CORS and block subdomains from making arbitrary requests on
+    # behalf of the logged in user, while allowing requests that are scoped to
+    # that subdomain.
+    #
+    # S3 Origin
+    # ---------
+    # The origin is really kind of a dummy origin since every origin request will go
+    # throug the lambda function. It can't be a real S3 Origin, instead it has to be
+    # the S3 Bucket's website origin, otherwise we can't forward the Host header and
+    # the subdomain splitting becomes useless.
+    #
+    # Viewer Certificate
+    # ------------------
+    # Currently no way to auto-create and manage the certificate through CloudFormation/Serverless
+    # so we create it manually and pass in the ARN.
+    #
+    # QueryString
+    # -----------
+    # Need to set to true ortherwise the querystring value given to the lambda will always be empty.
+    # Fine if you one doesn't want to use querystrings, but I do.
     SiteDistribution:
       Type: 'AWS::CloudFront::Distribution'
       Properties:
@@ -174,7 +219,7 @@ resources:
             TargetOriginId: S3Origin
             ViewerProtocolPolicy: redirect-to-https
             ForwardedValues:
-              QueryString: false
+              QueryString: true
               Headers:
                 - Access-Control-Request-Headers
                 - Access-Control-Request-Method
@@ -198,6 +243,75 @@ resources:
               CustomOriginConfig:
                 OriginProtocolPolicy: http-only
               DomainName: { 'Fn::Join': [ '.', [ { 'Ref': 'S3BucketData' }, 's3-website-us-east-1.amazonaws.com' ] ] }
+
+    # Create a DynamoDB table with a hash key based on user_id and a range key
+    # Going to keep it a simple/stupid per-user key/value store, though it might be neat to add metadata
+    # Will user Cognito user pools to scope permissions.
+    DynamoTable:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: user_id
+            AttributeType: S
+          -
+            AttributeName: key
+            AttributeType: S
+        KeySchema:
+          -
+            AttributeName: user_id
+            KeyType: HASH
+          -
+            AttributeName: key
+            KeyType: RANGE
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:provider.environment.DYNAMODB_USERDATA_TABLE}
+
+    # Cognito User Pool
+    # =================
+    # This will create the user pool and the policies so users can get access to their
+    # scoped resources like S3 for storage and DynamoDB for Key/Value data.
+    # Eventually I'll also want to set up other permissions for things like MQTT or other
+    # services.
+    #
+    # Alias Attributes
+    # ----------------
+    # I'm still not too sure about the right way to configure the attributes for a user
+    # I'd like the preferred_username to be used to map the subdomain. There's probably a ton
+    # of edge cases with updating or adding additional emails or changing the preferred_username
+    # but I'll ignore them for now.
+    #
+    # PasswordPolicy
+    # --------------
+    # I've chosen the most lax password policy. People can choose their own security vs. accessibility
+    # tradeoff. If someone wants to make an account to goof around and it has no valuable data, why
+    # restrict them?
+    UserPool:
+      Type: AWS::Cognito::UserPool
+      Properties:
+        UserPoolName: ${self:provider.environment.USER_POOL_NAME}
+        AliasAttributes:
+          - email
+          - preferred_username
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 6
+            RequireLowercase: false
+            RequireNumbers: false
+            RequireSymbols: false
+            RequireUppercase: false
+        Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: preferred_username
+          AttributeDataType: String
+          Mutable: true
+          Required: true
 
 #  Outputs:
 #     NewOutput:

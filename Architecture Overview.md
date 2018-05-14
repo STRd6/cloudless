@@ -19,12 +19,33 @@ Admin Panel
 Editor
 Reports
 
+Apps
+----
 
+Wiki
+Blog
+Forum
+Chat
+Spreadsheet
+Task Management
+Pixel Editor
+Management Panel (Manage Users, Scripts, Apps, Scheduled Tasks)
+
+Stage 2
+-------
 
 Email
 Quotas
 Events
 Monitoring
+Metrics
+
+Stage 3
+-------
+
+Presence
+Collaborative Editing
+Event Streams
 
 Thoughts
 --------

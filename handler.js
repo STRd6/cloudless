@@ -1,6 +1,8 @@
 'use strict'
 
 const AWS = require('aws-sdk')
+global.gAWS = AWS
+
 const request = require('request')
 
 const BUCKET = "cron-dev-s3bucketdata" // Hardcoded bucket because lambda@edge doesn't support environment variables!!@!
@@ -56,7 +58,7 @@ module.exports = {
       const program = data.Body.toString()
       try {
         const {request, config} = event.Records[0].cf
-        Function('event', 'request', 'config', 'context', 'callback', program)(event, request, config, context, callback);
+        Function('event', 'request', 'config', 'context', 'callback', 'require', program)(event, request, config, context, callback, require);
       } catch (e) {
         console.error(e)
         callback(null, errorResponse(e))

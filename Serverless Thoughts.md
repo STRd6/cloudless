@@ -23,6 +23,10 @@ A lot of the tutorials involve clicking around on the web console to create reso
 
 Getting custom domains requires manually creating the certificate through the AWS interface.
 
+Can't escape variable interpolation. There are some strings that you are unable to write! Some of these are even used in AWS! WTF!
+
+Serverless doesn't make it easy to use region or account id refs yet. Hard coding them as config works ok for single region, single account stacks.
+
 AWS Shenanigans
 ===============
 

@@ -26,21 +26,37 @@ provider:
   runtime: nodejs6.10
   profile: serverless
   environment:
-    RAD: cool
     BUCKET: '${self:custom.bucketName}'
     DYNAMODB_USERDATA_TABLE: '${self:service}-userdata'
+    IDENTITY_POOL_NAME: '${self:service}'
     USER_POOL_NAME: '${self:service}'
   region: us-east-1
+  accountId: 186123361267
 
   iamRoleStatements:
-    -  Effect: "Allow"
-       Action:
-         - "s3:*"
-       Resource: "arn:aws:s3:::${self:custom.bucketName}"
-    -  Effect: "Allow"
-       Action:
-         - "s3:*"
-       Resource: "arn:aws:s3:::${self:custom.bucketName}/*"
+    - Effect: "Allow"
+      Action:
+        - "s3:*"
+      Resource:
+        "arn:aws:s3:::${self:custom.bucketName}"
+    - Effect: "Allow"
+      Action:
+        - "s3:*"
+      Resource:
+        "arn:aws:s3:::${self:custom.bucketName}/*"
+    - Effect: "Allow"
+      Action:
+        - "dynamodb:*"
+      Resource:
+        "arn:aws:dynamodb:${self:provider.region}:${self:provider.accountId}:table/${self:provider.environment.DYNAMODB_USERDATA_TABLE}"
+    - Effect: "Allow"
+      Action:
+        - "cognito-identity:*"
+      Resource:
+        # TODO: Better security scoping
+        # This is a hassle because I don't think we can easily reference the resource using serverless
+        # "arn:aws:cognito-sync:${self:provider.region}:${self:provider.accountId}:identitypool/${self:provider.identityPoolId}"
+        "*"
 
 custom:
   bucketName: '${self:service}-${self:provider.stage}-s3bucketdata'
@@ -142,6 +158,7 @@ resources:
         WebsiteConfiguration:
           IndexDocument: index.html
           ErrorDocument: error.html
+
     BucketEventLambdaPermissionDataS3:
       Type: "AWS::Lambda::Permission"
       Properties:
@@ -270,8 +287,11 @@ resources:
           WriteCapacityUnits: 1
         TableName: ${self:provider.environment.DYNAMODB_USERDATA_TABLE}
 
-    # Cognito User Pool
+    # Cognito User Pool / Identity Pool
     # =================
+    # After I learn more I may want to dump Cognito and shift to solely developer provided
+    # identities, but Cognito does provide some neat things like Oauth so who knows.
+    #
     # This will create the user pool and the policies so users can get access to their
     # scoped resources like S3 for storage and DynamoDB for Key/Value data.
     # Eventually I'll also want to set up other permissions for things like MQTT or other
@@ -312,6 +332,128 @@ resources:
           AttributeDataType: String
           Mutable: true
           Required: true
+
+    UserPoolClient:
+      Type: "AWS::Cognito::UserPoolClient"
+      Properties:
+        ClientName: ${self:service}
+        UserPoolId:
+          Ref: UserPool
+
+    IdentityPool:
+      Type: "AWS::Cognito::IdentityPool"
+      Properties:
+        IdentityPoolName: ${self:provider.environment.IDENTITY_POOL_NAME}
+        AllowUnauthenticatedIdentities: true
+        DeveloperProviderName: ${self:service}
+        CognitoIdentityProviders:
+          - ClientId:
+              Ref: UserPoolClient
+            ProviderName:
+              "Fn::GetAtt":
+                - UserPool
+                - ProviderName
+
+    UnauthenticatedRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Principal:
+                Federated: "cognito-identity.amazonaws.com"
+              Action:
+                - "sts:AssumeRoleWithWebIdentity"
+              Condition:
+                StringEquals:
+                  "cognito-identity.amazonaws.com:aud":
+                    Ref: IdentityPool
+                "ForAnyValue:StringLike":
+                  "cognito-identity.amazonaws.com:amr": unauthenticated
+
+    AuthenticatedRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: "Allow"
+              Principal:
+                Federated: "cognito-identity.amazonaws.com"
+              Action:
+                - "sts:AssumeRoleWithWebIdentity"
+              Condition:
+                StringEquals:
+                  "cognito-identity.amazonaws.com:aud":
+                    Ref: IdentityPool
+                "ForAnyValue:StringLike":
+                  "cognito-identity.amazonaws.com:amr": authenticated
+
+    AuthenticatedPolicy:
+      Type: "AWS::IAM::Policy"
+      Properties:
+        PolicyName: '${self:service}-authenticated'
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            -
+              Action:
+                - "s3:ListBucket"
+              Effect: Allow
+              Resource:
+                - "arn:aws:s3:::${self:custom.bucketName}"
+              Condition:
+                StringLike:
+                  "s3:prefix":
+                    "Fn::Join": # Have to do this weird join because Serverless doesn't allow escaping substitution variables
+                      - ""
+                      - ["$", "{", "cognito-identity.amazonaws.com:sub", "}", "/*"]
+            -
+              Action:
+                - "s3:GetObject"
+                - "s3:PutObject"
+                - "s3:DeleteObject"
+              Effect: Allow
+              Resource:
+                - "Fn::Join": # Have to do this weird join because Serverless doesn't allow escaping substitution variables
+                  - ""
+                  - ["arn:aws:s3:::${self:custom.bucketName}/", "$", "{", "cognito-identity.amazonaws.com:sub", "}", "/*"]
+            -
+              Action:
+                - "dynamodb:DeleteItem"
+                - "dynamodb:GetItem"
+                - "dynamodb:PutItem"
+                - "dynamodb:Query"
+                - "dynamodb:UpdateItem"
+              Effect: Allow
+              Resource:
+                - "arn:aws:dynamodb:${self:provider.region}:${self:provider.accountId}:table/${self:provider.environment.DYNAMODB_USERDATA_TABLE}"
+              Condition:
+                "ForAllValues:StringEquals":
+                  "dynamodb:LeadingKeys":
+                    - "Fn::Join": # Have to do this weird join because Serverless doesn't allow escaping substitution variables
+                      - ""
+                      - ["$", "{", "cognito-identity.amazonaws.com:sub", "}"]
+        Roles:
+          -
+            Ref: AuthenticatedRole
+
+    # Assigns the roles to the Identity Pool
+    RoleAttachment:
+      Type: "AWS::Cognito::IdentityPoolRoleAttachment"
+      Properties:
+        IdentityPoolId:
+          Ref: IdentityPool
+        Roles:
+          authenticated:
+            "Fn::GetAtt":
+              - AuthenticatedRole
+              - Arn
+          unauthenticated:
+            "Fn::GetAtt":
+              - UnauthenticatedRole
+              - Arn
 
 #  Outputs:
 #     NewOutput:
